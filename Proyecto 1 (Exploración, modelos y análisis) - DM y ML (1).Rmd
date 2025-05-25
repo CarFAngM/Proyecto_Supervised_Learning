@@ -1,0 +1,1618 @@
+---
+title: "Exploración, modelos y análisis - Proyecto 1"
+author: "Carlos Angel, José Donado, Carlos Aldana, Diego Monroy y Marco Carbajal"
+date: "2025-05-02"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE,message=FALSE,warning=FALSE)
+```
+
+## [Proyecto #1: Predicción de recompra y devoluciones en clientes de una tienda online]{.underline}
+
+## 1. Preparación del entorno
+
+#### ***Librerías necesarias***
+
+```{r Librerias, include=TRUE}
+library(dplyr)
+library(fastDummies)
+library(ggplot2)
+library(psych)
+library(corrplot)
+library(tidyr)
+library(broom)
+library(sigr)
+library(ggplot2)
+library(WVPlots)
+library(Metrics)
+library(e1071)
+library(weights)
+library(corrplot)
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+library(e1071)
+library(readxl)
+library(randomForest)
+library(writexl)
+```
+
+#### ***Cargar el dataset***
+
+```{r Cargar dataset, include=TRUE}
+df <- read_excel("P5_Recompra_Online.xlsx")
+```
+
+## 2. Tipos de datos
+
+```{r Tipos de datos, include=FALSE}
+glimpse(df)
+
+summary(df)
+
+devoluciones <- filter(df, Quantity < 0)
+
+# cuántas facturas únicas tienen devoluciones
+num_facturas_con_devoluciones <- n_distinct(devoluciones$InvoiceNo)
+
+facturas_totales = n_distinct(df$InvoiceNo)
+
+# agregar una columna de monto 
+df = mutate(df, monto = df$UnitPrice * Quantity)
+
+
+df <- df %>%
+  mutate(region = case_when(
+    Country %in% c("Australia", "Bahrain", "Singapore", "Saudi Arabia", "Hong Kong", "Lebanon", "Israel") ~ "Asia",
+    Country %in% c("Austria", "Belgium", "Cyprus", "Czech Republic", "Denmark", "EIRE", "Finland", "France", 
+                   "Germany", "Greece", "Italy", "Lithuania", "Malta", "Netherlands", "Norway", "Poland", 
+                   "Portugal", "Spain", "Sweden", "Switzerland", "United Kingdom") ~ "Europa",
+    Country %in% c("Brazil", "Canada", "USA") ~ "América",
+    Country %in% c("RSA") ~ "África",
+    Country %in% c("Unspecified") ~ "No Especificado",
+    TRUE ~ "Otros"  # Para cualquier país no clasificado
+  ))
+
+df <- df %>%
+  mutate(
+    year = year(InvoiceDate),
+    month = month(InvoiceDate),
+    day = day(InvoiceDate),
+    hour = hour(InvoiceDate),
+    minute = minute(InvoiceDate)
+  )
+
+df <- df %>%
+  mutate(
+    dia_semana = wday(InvoiceDate, label = TRUE, abbr = FALSE, week_start = 3)  # miercoles = 3
+  )
+```
+
+**¿Qué tipos de datos identificamos?**
+
+En el dataset original, contamos con 4 variables de tipo "character", 3 de tipo "double" y 1 de tipo "dttm".
+
+## 3. Distribución de los datos
+
+#### ***Por país***
+
+```{r Distribucion por pais, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+unique_countries <- unique(df$Country)
+cat("Países únicos en el dataset:", paste(unique_countries, collapse = ", "), "\n")
+summary(unique_countries)
+```
+
+En total, hay 38 países distintos en el dataset.
+
+#### ***Por precio unitario***
+
+```{r Distribucion precio unitario, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+summary(df$UnitPrice)
+```
+
+En el dataset original, el precio unitario tiene un rango entre -\$11062.06 y \$38970.00, con una media de \$4.61 y mediana de \$2.08.
+
+**\*Nota:** Más adelante (en la sección de exploración y las tablas de contingencia), se analizará más a profundidad la distribución de los datos.
+
+## 4. Relaciones entre variables
+
+Estas relaciones se explorarán en las preguntas y gráficos que se presentan a continuación.
+
+## 5. Preguntas de exploración
+
+```{r Exploracion, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+glimpse(df)
+
+# agregar una columna de monto 
+df = mutate(df, monto = df$UnitPrice * Quantity)
+
+devoluciones <- filter(df, Quantity < 0)
+
+
+df2 = filter(df, !is.na(CustomerID))
+
+devoluciones2 <- filter(df2, Quantity < 0)
+
+# cuántas facturas únicas tienen devoluciones
+num_facturas_con_devoluciones <- n_distinct(devoluciones$InvoiceNo)
+
+facturas_totales = n_distinct(df$InvoiceNo)
+
+filter(df, is.na(InvoiceNo))
+
+c = df %>% group_by(Country) %>% summarise(n = n())
+```
+
+Las preguntas que hemos planteado para entender a profundidad el conjunto de datos y alcanzar los objetivos del proyecto son las siguientes:
+
+**1.** ¿Cuántas facturas contienen devoluciones?
+
+```{r P1, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+devoluciones <- filter(df, Quantity < 0)
+
+# cuántas facturas únicas tienen devoluciones
+num_facturas_con_devoluciones <- n_distinct(devoluciones$InvoiceNo)
+print(num_facturas_con_devoluciones)
+
+#facutas_totales 
+facturas_totales = n_distinct(df$InvoiceNo)
+```
+
+**2.** ¿Cuánto ha sido el monto total obtenido por la empresa?
+
+```{r P2, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+sum(df$monto)
+
+filter(df, monto < 0) 
+
+# dinero de compras 
+sum(filter(df,monto > 0)$monto)
+
+# dinero perdido de devoluciones
+sum(filter(df,monto < 0)$monto)
+
+```
+
+**3.** ¿Cuántas personas han hecho por lo menos una devolución?
+
+```{r P3, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+num_facturas_con_devoluciones <- n_distinct(devoluciones$InvoiceNo)
+
+agrupar_facturas <- devoluciones %>%
+  group_by(InvoiceNo) %>%
+  summarise(
+    CustomerID = max(CustomerID)  # asumes que hay un único cliente por factura
+  )
+
+agrupar_facturas2 <- devoluciones2 %>%
+  group_by(InvoiceNo) %>%
+  summarise(
+    CustomerID = max(CustomerID)  # asumes que hay un único cliente por factura
+  )
+
+personas_devolucion <- agrupar_facturas %>%
+  group_by(CustomerID) %>%
+  summarise(
+    facturas_con_devoluciones = n()
+  )
+
+personas_devolucion2 <- agrupar_facturas2 %>%
+  group_by(CustomerID) %>%
+  summarise(
+    facturas_con_devoluciones = n()
+  )
+
+arrange(personas_devolucion, desc(facturas_con_devoluciones))
+
+```
+
+**4.** ¿Cuántos datos tienen clientes que no tienen ID?
+
+```{r P4, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+clientes_na = filter(df, is.na(CustomerID)) 
+
+count(clientes_na)
+
+```
+
+**5.** ¿Cuál es el producto que más se devuelve?
+
+```{r P5, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+devolucion_productos = devoluciones %>%
+                          group_by(StockCode) %>%
+                          summarise(
+                            conteo = n()
+                          )
+
+arrange(devolucion_productos, desc(conteo))
+
+```
+
+**6.** ¿Cuántos clientes han recomprado?
+
+```{r P6, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+clientes_recompradores <- df2 %>%
+  filter(Quantity > 0) %>%  
+  group_by(CustomerID) %>%
+  summarise(facturas = n_distinct(InvoiceNo)) %>%
+  filter(facturas > 1)
+
+
+arrange(clientes_recompradores, desc(facturas))
+
+```
+
+**7.** ¿Cuál es el producto que más veces compran?
+
+```{r P7, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+productos_mas_comprado <- df %>%
+  filter(Quantity > 0) %>% 
+  group_by(StockCode) %>%  
+  summarise(veces_comprado = n()) %>%
+  arrange(desc(veces_comprado))
+
+head(productos_mas_comprado, 10)
+
+# producto mas veces comprado en terminos de facturas
+productos_mas_comprado2 <- df %>%
+  filter(Quantity > 0) %>% 
+  group_by(StockCode) %>%  
+  distinct(InvoiceNo) %>%
+  summarise(veces_comprado = n()) %>%
+  arrange(desc(veces_comprado))
+
+head(productos_mas_comprado2, 10)
+
+sum(productos_mas_comprado2$veces_comprado)
+
+
+```
+
+**8.** ¿La fecha de la última devolución influye en la cantidad de veces que se ha devuelto un producto?
+
+```{r P8, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+ultima_devolucion_cantdev <- devoluciones %>%  
+  group_by(StockCode) %>%  
+  summarise(veces_devuelto = n(), fecha_de_ultima_devolucion = max(InvoiceDate)) %>%
+  arrange(desc(fecha_de_ultima_devolucion))
+
+head(ultima_devolucion_cantdev,10)
+
+
+```
+
+**9.** ¿El país influye en la cantidad de devoluciones y recompras en la tienda?
+
+```{r P9, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+
+filter(df, is.na(Country))
+
+facturas_con_devoluciones <- devoluciones %>%
+  group_by(InvoiceNo, dia_semana, Country) %>%
+  summarise(InvoiceDate = min(InvoiceDate), .groups = "drop")
+
+dev_paises <- facturas_con_devoluciones %>%  
+  group_by(Country) %>%  
+  summarise(veces_devuelto = n()) %>%
+  arrange(desc(veces_devuelto))
+
+head(dev_paises,10)
+
+compras_paises <- df %>%
+  distinct(Country, InvoiceNo) %>%
+  group_by(Country) %>%
+  summarise(facturas = n()) %>%
+  arrange(desc(facturas))
+
+head(compras_paises,10) 
+
+Paises = right_join(dev_paises,compras_paises, by= c("Country"))
+
+Paises = Paises %>% mutate(indice_dev = veces_devuelto/facturas)
+
+recompras_pais <- df2 %>%
+  filter(Quantity > 0, !is.na(CustomerID)) %>%
+  distinct(InvoiceNo, CustomerID, Country) %>%
+  group_by(CustomerID, Country) %>%
+  summarise(facturas = n(), .groups = "drop") %>%
+  filter(facturas > 1) %>%
+  group_by(Country) %>%
+  summarise(recompras = n())
+
+Paises <- left_join(Paises, recompras_pais, by = "Country")
+
+head(Paises)
+```
+
+**10.** ¿Existe algún mes con más compras?
+
+```{r P10, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+compras_por_mes <- df %>%
+  filter(Quantity > 0) %>%
+  mutate(month = month(InvoiceDate, label = TRUE)) %>%  
+  distinct(InvoiceNo, month) %>%
+  group_by(month) %>%
+  summarise(facturas = n()) %>%
+  arrange(desc(facturas))
+
+ggplot(compras_por_mes, aes(x = month, y = facturas)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Compras por mes", x = "Mes", y = "Cantidad de compras") +
+  theme_minimal()
+```
+
+**11.** ¿Existe algun día con más compras?
+
+```{r P11, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+compras_por_dia <- df %>%
+  filter(Quantity > 0) %>%
+  distinct(InvoiceNo, dia_semana) %>%
+  group_by(dia_semana) %>%
+  summarise(facturas = n()) %>%
+  arrange(desc(facturas))
+compras_por_dia$dia_semana <- factor(compras_por_dia$dia_semana,
+                                      levels = c("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"))
+
+ggplot(compras_por_dia, aes(x = dia_semana, y = facturas)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Compras por día de la semana", x = "Día de la semana", y = "Cantidad de compras") +
+  theme_minimal()
+```
+
+**12.** ¿Cuál es la evolución de las devoluciones en el tiempo?
+
+```{r P12, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+evolucion_mensual <- facturas_con_devoluciones %>%
+  mutate(fecha = floor_date(InvoiceDate, unit = "month")) %>%
+  group_by(fecha) %>%
+  summarise(devoluciones = n()) %>%
+  arrange(fecha)
+
+min(df$InvoiceDate)
+
+evolucion_diaria <- facturas_con_devoluciones %>%
+  group_by(dia_semana) %>%
+  summarise(devoluciones = n()) %>%
+  arrange(dia_semana)
+
+sum(evolucion_diaria$devoluciones) 
+
+ggplot(evolucion_mensual, aes(x = fecha, y = devoluciones)) +
+  geom_line(color = "red") +
+  labs(title = "Evolución mensual de devoluciones", x = "Fecha", y = "Cantidad de devoluciones")
+
+evolucion_diaria$dia_semana <- factor(evolucion_diaria$dia_semana,
+                                      levels = c("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"))
+
+ggplot(evolucion_diaria, aes(x = factor(dia_semana), y = devoluciones)) +
+  geom_col(fill = "red") +
+  labs(title = "Devoluciones por día de la semana",
+       x = "Día de la semana",
+       y = "Cantidad de devoluciones") +
+  theme_minimal()
+```
+
+**13.** ¿El volumen de compras crece o decrece con el tiempo?
+
+```{r P13, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+devoluciones <- filter(df, Quantity < 0)
+
+facturas_mensuales <- df %>%
+  distinct(InvoiceNo, month) %>%  # Facturas únicas por mes
+  group_by(month) %>%
+  summarise(total_facturas = n()) %>%
+  arrange(month)
+
+sum(facturas_mensuales$total_facturas)
+
+# Visualiza la evolución
+ggplot(facturas_mensuales, aes(x = month, y = total_facturas)) +
+  geom_line(color = "steelblue", size = 5) +
+  geom_point(color = "darkblue") +
+  labs(title = "Evolución del volumen de compras (número de facturas) mensuales",
+       x = "Mes",
+       y = "Número de facturas") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_x_continuous(breaks = 1:12,
+                     labels = c("Ene", "Feb", "Mar", "Abr", "May", "Jun", 
+                                "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"))
+```
+
+**14.** ¿En cuántos y cuáles países está presente la empresa?
+
+```{r P14, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+unique_countries <- unique(df$Country)
+cat("Países únicos en el dataset:", paste(unique_countries, collapse = ", "), "\n")
+summary(unique_countries)
+```
+
+Se tienen 38 países registrados. Lo cual corresponde al alcance geográfico de la compañía.
+
+**15.** ¿Cómo se distribuye la cantidad consumida por país?
+
+```{r P15, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+df %>%
+  group_by(Country) %>%
+  summarise(
+    Min_Quantity = min(Quantity),
+    Q1_Quantity = quantile(Quantity, 0.25),
+    Median_Quantity = median(Quantity),
+    Mean_Quantity = mean(Quantity),
+    Q3_Quantity = quantile(Quantity, 0.75),
+    Max_Quantity = max(Quantity),
+    IQR_Quantity = IQR(Quantity),
+    N = n() # Number of transactions for the country
+  ) %>%
+  arrange(Median_Quantity) %>%
+  print(n = nrow(.)) # Print all rows
+
+```
+
+**16.** ¿Cuál es la distribución del consumo total (spending) de cada cliente?
+
+```{r P16, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+# Calculate the total value of purchases per customer (excluding returns)
+customer_positive_spending <- df %>%
+  # Excluyendo los que no tienen CustomerID
+  filter(!is.na(CustomerID)) %>%
+  mutate(LineTotal = Quantity * UnitPrice) %>%
+  filter(LineTotal > 0) %>%
+  #AGRUPAR POR CUSTOMER
+  group_by(CustomerID) %>%
+  summarise(TotalPositiveSpending = sum(LineTotal)) %>%
+
+  ungroup()
+
+print(customer_positive_spending)
+
+
+# Distribución del Spending (sin negativos)
+
+percentile_99 <- quantile(customer_positive_spending$TotalPositiveSpending, 0.99, na.rm = TRUE)
+customer_spending_filtered <- customer_positive_spending %>%
+  filter(TotalPositiveSpending <= percentile_99)
+
+cat("Número de clientes antes del filtrado:", nrow(customer_positive_spending), "\n")
+cat("Número de clientes después del filtrado: (<= 99 percentil):", nrow(customer_spending_filtered), "\n")
+
+# Gráfica del Spending filtradooo
+## sin escala logarítmica porque no se logra ver
+
+ggplot(customer_spending_filtered, aes(x = TotalPositiveSpending)) +
+  geom_histogram(binwidth = 300) 
+  labs(title = "Distribution of Total Positive Spending (Excluding Top 1%)",
+       x = "Total Positive Spending",
+       y = "Number of Customers") +
+  theme_minimal()
+  
+# Distribución de TotalPositiveSpending
+summary(customer_positive_spending$TotalPositiveSpending)
+```
+
+Un 75% de los consumidores han gastado entre \$307 y \$1662 durante el tiempo que abarca todas las transacciones registradas en el dataset.
+
+[**Conclusiones de la exploración**]{.underline}
+
+A partir de la exploración, podemos concluir que existe una diferencia extremadamente significativa entre los datos atipicos tanto de devoluciones como de compras. Esto se puede observar en la gráfica de distribución de compras, donde el 75% de los consumidores han gastado entre \$307 y \$1662 durante el tiempo que abarca todas las transacciones registradas en el dataset. Esto puede causar cierta dificultad en encontrar variables para los diversos modelos sin que estas tengan el ruido de la data atipica. Por otro lado, vemos que no existe una relación entre la región en la que se hace un pedido y la cantidad de devoluciones. Esto puede ser un indicativo de que el problema no es geográfico, sino que puede estar relacionado con el producto o la experiencia del cliente. Finalmente, vemos que existe evidencia que defiende un aumento en la cantidad de transacciones los dias jueves, ademas de un aumento general en la cantidad de productos comprados en las compras mas recientes. Esto puede ser un indicativo de que la empresa ha logrado aumentar su base de clientes, o que los clientes han aumentado su frecuencia de compra. Lo que sugiere que pueda existir la necesidad de filtrar los datos antiguos del dataset para evitar que estos afecten los modelos.
+
+## 6. Transformación de datos
+
+```{r Transformacion, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+facturas_unicas <- df %>%
+  distinct(InvoiceNo, .keep_all = TRUE)
+  
+facturas_por_hora <- facturas_unicas %>%
+  filter(Quantity > 0) %>%
+  group_by(CustomerID, hour) %>%
+  summarise(total_facturas_hora = n(), .groups = "drop") %>%
+  arrange(CustomerID, desc(total_facturas_hora))
+
+sum(facturas_por_hora$total_facturas_hora)
+
+# Facturas por mes
+facturas_por_mes <- facturas_unicas %>%
+  filter(Quantity > 0) %>%
+  group_by(CustomerID, month) %>%
+  summarise(total_facturas_mes = n(), .groups = "drop") %>%
+  arrange(CustomerID, desc(total_facturas_mes))
+
+# Facturas por día de la semana
+facturas_por_dia_semana <- facturas_unicas %>%
+  filter(Quantity > 0) %>%
+  group_by(CustomerID, dia_semana) %>%
+  summarise(total_facturas_dia_semana = n(), .groups = "drop") %>%
+  arrange(CustomerID, desc(total_facturas_dia_semana))
+
+hora_max_facturas <- facturas_unicas %>%
+  filter(Quantity > 0) %>%
+  group_by(CustomerID, hour) %>%
+  summarise(cantidad = n(), .groups = "drop") %>%
+  arrange(CustomerID, desc(cantidad), hour) %>%
+  group_by(CustomerID) %>%
+  slice(1) %>%  # selecciona solo una por cliente
+  ungroup() %>%
+  rename(hora_max_compras = hour)
+
+# Mes con más compras
+mes_max_facturas <- facturas_unicas %>%
+  filter(Quantity > 0) %>%
+  group_by(CustomerID, month) %>%
+  summarise(cantidad = n(), .groups = "drop") %>%
+  arrange(CustomerID, desc(cantidad), month) %>%
+  group_by(CustomerID) %>%
+  slice(1) %>%
+  ungroup() %>%
+  rename(mes_max_compras = month)
+
+# Día de la semana con más compras
+dia_max_facturas <- facturas_unicas %>%
+  filter(Quantity > 0) %>%
+  group_by(CustomerID, dia_semana) %>%
+  summarise(cantidad = n(), .groups = "drop") %>%
+  arrange(CustomerID, desc(cantidad), dia_semana) %>%
+  group_by(CustomerID) %>%
+  slice(1) %>%
+  ungroup() %>%
+  rename(dia_semana_max_compras = dia_semana)
+
+# Asegurarse de tener facturas únicas
+
+facturas <- df2 %>%
+  group_by(InvoiceNo, CustomerID) %>%
+  summarise(
+    InvoiceDate = min(InvoiceDate),  # o max() si lo prefieres
+    monto = sum(monto),              # total por factura
+    Quantity = sum(Quantity),        # total de productos
+    region = last(region),          # o first(), dependiendo
+    .groups = "drop"
+  )
+
+# Información de compras
+clientes_compras <- facturas %>%
+  filter(Quantity > 0) %>%
+  group_by(CustomerID) %>%
+  summarise(
+    ultima_compra = max(InvoiceDate),  # Última compra usando la fecha de la última factura
+    total_compras = sum(monto), 
+    region = last(region) ,
+    cant_facturas_compras = n_distinct(InvoiceNo),
+    cantidad_productos = sum(Quantity)
+  ) %>% 
+  left_join(hora_max_facturas, by = "CustomerID") %>%
+  left_join(mes_max_facturas, by = "CustomerID") %>%
+  left_join(dia_max_facturas, by = "CustomerID")
+
+str(clientes_compras)
+
+clientes_compras = clientes_compras %>% select(-cantidad.x, -cantidad.y, -cantidad)
+
+# Información de devoluciones
+clientes_devoluciones <- facturas %>%
+  filter(Quantity < 0) %>%  # Solo las devoluciones
+  group_by(CustomerID) %>%
+  summarise(
+    ultima_devolucion = max(InvoiceDate),  # Última fecha de devolución
+    veces_devoluciones = n_distinct(InvoiceNo),
+    region = last(region) , 
+    cantidad_devuelta= sum(Quantity),
+    total_devoluciones = sum(monto)# Número de devoluciones
+  )
+
+# Clasificación de recompras
+clientes_recompradores <- clientes_recompradores %>%
+  mutate(ha_recomprado = ifelse(facturas > 1, 1, 0))# Asumimos que recomprador es aquel con más de 1 factura
+
+# Clasificación de devoluciones
+clientes_devolucion <- personas_devolucion2 %>%
+  mutate(ha_devuelto = ifelse(facturas_con_devoluciones > 0, 1, 0)) # Si tiene devoluciones, asignamos 1
+
+# Unir todos los data frames en una sola tabla final
+clientes <- clientes_compras %>%
+  left_join(clientes_devoluciones, by = "CustomerID", suffix = c("", "_devol")) %>%
+  left_join(clientes_recompradores, by = "CustomerID") %>%
+  left_join(clientes_devolucion, by = "CustomerID") %>%
+  select(
+    CustomerID,
+    ultima_compra,
+    ultima_devolucion,
+    veces_devoluciones,
+    hora_max_compras,
+    dia_semana_max_compras,
+    mes_max_compras,
+    ha_devuelto,
+    ha_recomprado,
+    total_compras,
+    total_devoluciones,
+    region,
+    cant_facturas_compras, 
+    cantidad_devuelta, 
+    cantidad_productos
+  )
+
+clientes <- clientes %>% mutate(
+    cantidad_devuelta = if_else(is.na(cantidad_devuelta), 0, cantidad_devuelta),
+    ultima_devolucion   = coalesce(ultima_devolucion, as.POSIXct(NA)), 
+    veces_devoluciones  = if_else(is.na(veces_devoluciones), 0, veces_devoluciones),
+    ha_devuelto          = if_else(is.na(ha_devuelto), 0, ha_devuelto),
+    ha_recomprado       = if_else(is.na(ha_recomprado), 0, ha_recomprado) ,
+    total_devoluciones =  if_else(is.na(total_devoluciones), 0, total_devoluciones), 
+    cantidad_total = cantidad_productos + cantidad_devuelta
+  )
+
+clientes  = clientes %>% mutate(cant_facturas_compras = cant_facturas_compras + veces_devoluciones, dinero = total_compras + total_devoluciones
+                                )
+
+clientes = clientes %>% mutate(indice_devolucion = veces_devoluciones/cant_facturas_compras)
+
+clientes <- clientes %>%
+  select(
+    ultima_compra,
+    ultima_devolucion,
+    veces_devoluciones,
+    hora_max_compras,
+    dia_semana_max_compras,
+    mes_max_compras,
+    total_compras,
+    total_devoluciones,
+    region,
+    cant_facturas_compras,
+    cantidad_devuelta,
+    cantidad_productos,
+    cantidad_total,
+    indice_devolucion,
+    ha_devuelto,
+    ha_recomprado,
+    dinero
+  )
+
+# Solamente precios positivos
+df_cleaned_price <- df %>%
+  filter(UnitPrice > 0)
+
+cat("Original number of rows:", nrow(df), "\n")
+cat("Number of rows after removing UnitPrice <= 0:", nrow(df_cleaned_price), "\n")
+
+```
+
+## 7. Gráficos de exploración
+
+A continuación se presentan múltiples gráficos que complementan y aportan a la exploración y comparación de las variables presentes en el dataset:
+
+**1.** Facturas por hora
+
+```{r G1, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+ggplot(facturas_unicas, aes(x = hour)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Cantidad de facturas por hora", x = "Hora", y = "Cantidad de facturas")
+```
+
+**2.** Clientes por región
+
+```{r G2, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+ggplot(clientes, aes(x = region)) +
+  geom_bar(fill = "darkgreen") +
+  labs(title = "Cantidad de clientes por región", x = "Región", y = "Número de clientes")
+```
+
+**3.** Devoluciones por día de la semana
+
+```{r G3, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+ggplot(facturas_unicas, aes(x = dia_semana)) +
+  geom_bar(fill = "darkred") +
+  labs(title = "Facturas por día de la semana", x = "Día", y = "Cantidad")
+```
+
+**4.** Total de compras frente a la cantidad de facturas
+
+```{r G4, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+ggplot(clientes, aes(x = cant_facturas_compras, y = total_compras)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Total de compras vs Cantidad de facturas", x = "Cantidad de facturas", y = "Total de compras")
+```
+
+**5.** Total de compras frente al total de devoluciones
+
+```{r G5, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+ggplot(clientes, aes(x = total_devoluciones, y = total_compras)) +
+  geom_point(color = "purple", alpha = 0.6) +
+  labs(title = "Compras vs Devoluciones", x = "Total devoluciones", y = "Total compras")
+```
+
+**6.** Monto por factura frente a hora de compra
+
+```{r G6, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+ggplot(facturas_unicas, aes(x = hour, y = monto)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "Monto por factura vs Hora de compra", x = "Hora", y = "Monto")
+```
+
+**7.** Distribución de facturas por hora
+
+```{r G7, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+ggplot(facturas_unicas, aes(x = hour)) +
+  geom_histogram(binwidth = 1, fill = "seagreen", color = "black") +
+  labs(title = "Distribución de facturas por hora", x = "Hora", y = "Cantidad")
+```
+
+**8.** Distribución de cantidad de productos por mes
+
+```{r G8, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+ggplot(facturas_unicas, aes(x = month)) +
+  geom_histogram(binwidth = 1, fill = "orange", color = "black") +
+  labs(title = "Distribución de cantidad de productos", x = "month", y = "Frecuencia")
+```
+
+**9.** Total de compras por región
+
+```{r G9, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+ggplot(clientes, aes(x = region, y = total_compras)) +
+  geom_boxplot(fill = "lightblue") +
+  labs(title = "Distribución del total de compras por región", x = "Región", y = "Total de compras")
+```
+
+**10.** Cantidad de facturas por región
+
+```{r G10, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+ggplot(clientes, aes(x = region, y = cant_facturas_compras)) +
+  geom_boxplot(fill = "lightgreen") +
+  labs(title = "Distribución de facturas por región", x = "Región", y = "Cantidad de facturas")
+```
+
+**11.** Monto por día de la semana
+
+```{r G11, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+ggplot(facturas_unicas, aes(x = dia_semana, y = monto)) +
+  geom_boxplot(fill = "pink") +
+  labs(title = "Monto por factura según el día de la semana", x = "Día", y = "Monto")
+```
+
+## 8. Tablas de contingencia
+
+Las tablas de contingencia respecto a la predicción de **devolución** son las siguientes:
+
+```{r Tablas de contingencia devolucion, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+# Respecto a region
+tabla1 <- table(clientes$region, clientes$ha_devuelto)
+tabla1_totales <- addmargins(tabla1)
+print(tabla1_totales)
+
+# Respecto a mes_max_compras
+tabla2 <- table(clientes$mes_max_compras, clientes$ha_devuelto)
+tabla2_totales <- addmargins(tabla2)
+print(tabla2_totales)
+
+# Respecto a dia_semana_max_compras
+tabla3 <- table(clientes$dia_semana_max_compras, clientes$ha_devuelto)
+tabla3_totales <- addmargins(tabla3)
+print(tabla3_totales)
+
+# Respecto a hora_max_compras
+tabla4 <- table(clientes$hora_max_compras, clientes$ha_devuelto)
+tabla4_totales <- addmargins(tabla4)
+print(tabla4_totales)
+```
+
+Las tablas de contingencia respecto a la predicción de **recompra** son las siguientes:
+
+```{r Tablas de contingencia recompra, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+# Respecto a region
+tabla1 <- table(clientes$region, clientes$ha_recomprado)
+tabla1_totales <- addmargins(tabla1)
+print(tabla1_totales)
+
+# Respecto a mes_max_compras
+tabla2 <- table(clientes$mes_max_compras, clientes$ha_recomprado)
+tabla2_totales <- addmargins(tabla2)
+print(tabla2_totales)
+
+# Respecto a dia_semana_max_compras
+tabla3 <- table(clientes$dia_semana_max_compras, clientes$ha_recomprado)
+tabla3_totales <- addmargins(tabla3)
+print(tabla3_totales)
+
+# Respecto a hora_max_compras
+tabla4 <- table(clientes$hora_max_compras, clientes$ha_recomprado)
+tabla4_totales <- addmargins(tabla4)
+print(tabla4_totales)
+```
+
+## 9. División del dataset: train y test
+
+```{r Division del dataset, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+# Vector con nombres de columnas que quieres convertir en factor
+cols_factor <- c("dia_semana_max_compras", "mes_max_compras", "region", "ha_devuelto", "ha_recomprado")
+
+# Convertir esas columnas en factor usando lapply
+clientes[cols_factor] <- lapply(clientes[cols_factor], as.factor)
+
+## 70% de la muestra va para train
+smp_size <- floor(0.70 * nrow(clientes))
+## Establecemos una semilla para que a todos nos quede el mismo valor
+set.seed(0020)
+## Creamos los archivos train y test
+train_ind <- sample(seq_len(nrow(clientes)), size = smp_size)
+train <- clientes[train_ind, ]
+test <- clientes[-train_ind, ]
+
+train2 = train
+train3 = train
+train = select(train, - ha_recomprado)
+```
+
+## 10. Modelos de clasificación [DEVOLUCIÓN]
+
+El modelo de Naive Bayes para predecir que un cliente devolverá compras es:
+
+```{r Naive Bayes devolucion, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+modeloBayes <- naiveBayes(
+  ha_devuelto ~ . - ultima_devolucion - total_devoluciones - 
+    cantidad_devuelta - cantidad_total - dinero - indice_devolucion - veces_devoluciones,
+  data = train
+)
+
+predNB5<-predict(modeloBayes, newdata=test, type="raw")
+
+predictionNB5<-as.data.frame(predNB5)
+
+predictionNB5$result<-ifelse(predictionNB5[,1]>predictionNB5[,2],0,1)
+
+predictionNB5$prediction_target = ifelse(predictionNB5$result==1,"Si","No")
+
+resultsNB5<-table(test$ha_devuelto, predictionNB5$prediction_target)
+resultsNB5
+
+#Accuracy
+accuracyNB5<-sum(diag(resultsNB5))/sum(resultsNB5)
+accuracyNB5
+
+#TP/(TP+FN)
+recall5<-(resultsNB5[2,2]/(resultsNB5[2,1]+resultsNB5[2,2]))
+recall5
+
+#TP/(TP+FP)
+precision5<-(resultsNB5[2,2]/(resultsNB5[1,2]+resultsNB5[2,2]))
+precision5
+
+```
+
+El modelo de Decision Tree para predecir que un cliente devolverá compras es:
+
+```{r Decision tree devolucion, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+modeloDT2 <- rpart(ha_devuelto ~ . - ultima_devolucion - total_devoluciones - 
+    cantidad_devuelta - cantidad_total - dinero - indice_devolucion - veces_devoluciones, method = "class",
+  data = train)
+
+
+predDT3<-predict(modeloDT2, newdata=test, type="class")
+PredDT4 = as.character(predDT3)
+PredDT4 = ifelse(predDT3 == "1","Si","No")
+
+resultsDT3<-table(test$ha_devuelto, PredDT4)
+resultsDT3
+prop.table(resultsDT3)
+
+#Calculo el acurracy de test
+accuracyDT3<-sum(diag(resultsDT3))/sum(resultsDT3)
+accuracyDT3
+
+#TP/(TP+FN)
+recall3<-(resultsDT3[2,2]/(resultsDT3[2,1]+resultsDT3[2,2]))
+recall3
+
+#TP/(TP+FP)
+precision3<-(resultsDT3[2,2]/(resultsDT3[1,2]+resultsDT3[2,2]))
+precision3
+
+rpart.plot(modeloDT2)
+```
+
+El modelo de Random Forest para predecir que un cliente devolverá compras es:
+
+```{r Random forest devolucion, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+train_rf <- train %>%
+  select( -ultima_devolucion,
+         -total_devoluciones, -cantidad_devuelta, -cantidad_total,
+         -dinero, -indice_devolucion, -veces_devoluciones)
+
+
+model1 <- randomForest(
+  ha_devuelto ~ total_compras + cantidad_productos + ultima_compra + mes_max_compras,
+  data = train_rf,
+  importance = TRUE,
+  ntree = 100,
+  mtry = 2,
+  maxnodes = 10,
+  nodesize = 10
+)
+
+predRD12 <- predict(model1, newdata = test, type = "class")
+predRD13 = ifelse(predRD12 == "1","Si","No")
+
+
+resultsDT12<-table(test$ha_devuelto, predRD13)
+prop.table(resultsDT12)
+
+# Accuracy
+accuracyDT12<-sum(diag(resultsDT12))/sum(resultsDT12)
+accuracyDT12
+
+#TP/(TP+FN)
+recall12<-(resultsDT12[2,2]/(resultsDT12[2,1]+resultsDT12[2,2]))
+recall12
+
+#TP/(TP+FP)
+precision12<-(resultsDT12[2,2]/(resultsDT12[1,2]+resultsDT12[2,2]))
+precision12
+```
+
+El modelo de Regresión lineal para predecir que un cliente devolverá compras es:
+
+```{r Regresion lineal (clasificacion) devolucion, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+train_dummy <- dummy_cols(train,
+                       select_columns = c("dia_semana_max_compras", "region", "mes_max_compras"),
+                       remove_selected_columns = TRUE,
+                       remove_first_dummy = TRUE)
+
+test_dummy <- dummy_cols(test,
+                       select_columns = c("dia_semana_max_compras", "region", "mes_max_compras"),
+                       remove_selected_columns = TRUE,
+                       remove_first_dummy = TRUE)
+
+
+train_dummy <- select(train_dummy,
+                      -ultima_devolucion,
+                      -total_devoluciones,
+                      -cantidad_devuelta,
+                      -cantidad_total,
+                      -dinero,
+                      -indice_devolucion,
+                      -veces_devoluciones, 
+                      - ultima_compra)
+
+# Entrenamiento del modelo logístico
+modelo_completo <- glm(
+  ha_devuelto ~ hora_max_compras 
+               + total_compras 
+               + cant_facturas_compras 
+               + cantidad_productos 
+               + dia_semana_max_compras_jueves 
+               + dia_semana_max_compras_viernes 
+               + dia_semana_max_compras_sábado 
+               + dia_semana_max_compras_domingo 
+               + dia_semana_max_compras_lunes 
+               + dia_semana_max_compras_martes 
+               + region_América 
+               + region_Asia 
+               + region_Europa 
+               + region_Otros 
+               + mes_max_compras_2 
+               + mes_max_compras_3 
+               + mes_max_compras_4 
+               + mes_max_compras_5 
+               + mes_max_compras_6 
+               + mes_max_compras_7 
+               + mes_max_compras_8 
+               + mes_max_compras_9 
+               + mes_max_compras_10 
+               + mes_max_compras_11 
+               + mes_max_compras_12,
+  data = train_dummy,
+  family = binomial
+)
+
+# Predicción en datos de prueba
+predtest_prob <- predict(modelo_completo, newdata = test_dummy, type = "response")
+
+# Convertimos las probabilidades a clases: SI o NO
+predtest <- ifelse(predtest_prob > 0.5, "SI", "NO")
+
+# Creamos una tabla de resultados comparando predicción vs realidad
+results_test <- table(Real = test_dummy$ha_devuelto, Predicho = predtest)
+
+# Proporciones de la tabla de confusión
+prop.table(results_test)
+
+
+#Calculo el acurracy de test
+accuracy_test<-sum(diag(results_test))/sum(results_test)
+accuracy_test
+
+#TP/(TP+FN)
+recall_test<-(results_test[2,2]/(results_test[2,1]+results_test[2,2]))
+recall_test
+
+#TP/(TP+FP)
+precision_test<-(results_test[2,2]/(results_test[1,2]+results_test[2,2]))
+precision_test
+```
+
+[**Resumen de los modelos [DEVOLUCIÓN]**]{.underline}
+
+```{r Metricas modelos devolucion, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+# Nombres de los modelos
+titulos_modelos <- c("Regresión", "Naive Bayes", "Árbol de Decisión", "Random Forest")
+
+# Métricas (sólo 1 modelo por tipo)
+Accuracy <- c(round(accuracy_test, 4), 
+              round(accuracyNB5, 4),
+              round(accuracyDT3, 4),
+              round(accuracyDT12, 4))
+
+Recall <- c(round(recall_test, 4), 
+            round(recall5, 4),
+            round(recall3, 4),
+            round(recall12, 4))
+
+Precision <- c(round(precision_test, 4), 
+               round(precision5, 4),
+               round(precision3, 4),
+               round(precision12, 4))
+
+# Crear dataframe
+Resultado <- data.frame(
+  Modelo = titulos_modelos,
+  Accuracy = Accuracy,
+  Recall = Recall,
+  Precision = Precision
+)
+
+# Convertir a formato largo
+ResultadoDF <- Resultado %>%
+  pivot_longer(cols = -Modelo, names_to = "Metrica", values_to = "Valor")
+
+# Graficar
+ggplot(ResultadoDF, aes(x = Modelo, y = Valor, fill = Metrica)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  labs(title = "Comparación de métricas de modelos de devolución",
+       x = "Modelo",
+       y = "Valor",
+       fill = "Métrica") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom")
+
+
+
+```
+
+[**Interpretación de las métricas**]{.underline}
+
+En nuestro caso, el *accuracy* nos dice qué proporción de todas las predicciones (tanto de clientes que devuelven como de los que no) son correctas, pero puede resultar engañoso si hay un fuerte desequilibrio entre ambos grupos (por ejemplo, si hay pocos clientes que devuelven pero muchos que no). El *precision* mide, de los clientes que el modelo predice como "devolverán", qué porcentaje efectivamente devuelve el producto; es decir, nos indica cuántos de los alertados como potenciales retornos son verdaderos retornos. Por otro lado, el *recall* nos dice, de todos los clientes que realmente devuelven, qué porcentaje somos capaces de detectar.
+
+Para empresas como esta, resulta conveniente priorizar el **recall** sobre precision, porque capturar la mayor cantidad posible de quienes realmente devolverán (aunque incluyamos algunos falsos positivos) nos permite diseñar estrategias preventivas (como promociones, ofertas o recordatorios) que reduzcan los costos operativos y de logística asociados a las devoluciones. Un recall alto nos asegura no "perder" casos de retorno reales.
+
+[**Conclusión del modelo [DEVOLUCIÓN]**]{.underline}
+
+Dado que buscamos priorizar el recall, el modelo óptimo sería el de **Random Forest**, ya que presenta el recall más alto de todos, así como un accuracy bastante alto.
+
+## 11. Modelos de clasificación [RECOMPRA]
+
+El modelo de Naive Bayes para predecir que un cliente recomprará es:
+
+```{r Naive bayes recompra, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+train2 = select(train2, -ha_devuelto)
+
+modeloBayes2 <- naiveBayes(
+  ha_recomprado ~ . - ultima_devolucion - total_devoluciones - 
+    cantidad_devuelta - indice_devolucion - veces_devoluciones - cant_facturas_compras -total_compras -veces_devoluciones,
+  data = train2
+)
+
+predNB6<-predict(modeloBayes, newdata=test, type="raw")
+
+predictionNB6<-as.data.frame(predNB6)
+
+predictionNB6$result<-ifelse(predictionNB6[,1]>predictionNB6[,2],0,1)
+
+predictionNB6$prediction_target = ifelse(predictionNB6$result==1,"Si","No")
+
+resultsNB6<-table(test$ha_devuelto, predictionNB6$prediction_target)
+resultsNB6
+
+# Accuracy
+accuracyNB6<-sum(diag(resultsNB6))/sum(resultsNB6)
+accuracyNB6
+
+#TP/(TP+FN)
+recall6<-(resultsNB6[2,2]/(resultsNB6[2,1]+resultsNB6[2,2]))
+recall6
+
+#TP/(TP+FP)
+precision6<-(resultsNB6[2,2]/(resultsNB6[1,2]+resultsNB6[2,2]))
+precision6
+```
+
+El modelo de Decision Tree para predecir que un cliente recomprará es:
+
+```{r Decision tree recompra, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+modeloDT3 <- rpart(ha_recomprado ~ . - ultima_devolucion - total_devoluciones - 
+    cantidad_devuelta - cantidad_total - dinero - indice_devolucion - veces_devoluciones - cant_facturas_compras, method = "class",
+  data = train2)
+
+predDT5<-predict(modeloDT2, newdata=test, type="class")
+PredDT6 = as.character(predDT5)
+PredDT6 = ifelse(predDT5 == "1","Si","No")
+
+resultsDT5<-table(test$ha_devuelto, PredDT6)
+resultsDT5
+prop.table(resultsDT5)
+
+#Calculo el acurracy de test
+accuracyDT5<-sum(diag(resultsDT5))/sum(resultsDT5)
+accuracyDT5
+
+#TP/(TP+FN)
+recall5<-(resultsDT5[2,2]/(resultsDT5[2,1]+resultsDT5[2,2]))
+recall5
+
+#TP/(TP+FP)
+precision5<-(resultsDT5[2,2]/(resultsDT5[1,2]+resultsDT5[2,2]))
+precision5
+
+rpart.plot(modeloDT3)
+```
+
+El modelo de Random Forest para predecir que un cliente recomprará es:
+
+```{r Random forest recompra, echo=TRUE, message=TRUE, warning=TRUE, include = TRUE}
+
+train_rf2 <- train2 %>%
+  select( - ultima_devolucion ,- total_devoluciones, - 
+    cantidad_devuelta ,- indice_devolucion, - veces_devoluciones, - cant_facturas_compras)
+
+
+model2 <- randomForest(
+  ha_recomprado ~ total_compras + cantidad_productos + ultima_compra + mes_max_compras,
+  data = train_rf2,
+  importance = TRUE,
+  ntree = 100,
+  mtry = 2,
+  maxnodes = 10,
+  nodesize = 10
+)
+
+predRD10 <- predict(model2, newdata = test, type = "class")
+predRD11 = ifelse(predRD10 == "1","Si","No")
+resultsDT10<-table(test$ha_devuelto, predRD11)
+prop.table(resultsDT10)
+
+accuracyDT10<-sum(diag(resultsDT10))/sum(resultsDT10)
+accuracyDT10
+
+#TP/(TP+FN)
+recall10<-(resultsDT10[2,2]/(resultsDT10[2,1]+resultsDT10[2,2]))
+recall10
+
+#TP/(TP+FP)
+precision10<-(resultsDT10[2,2]/(resultsDT10[1,2]+resultsDT10[2,2]))
+precision10
+```
+
+El modelo de Regresión lineal para predecir que un cliente recomprará es:
+
+```{r Regresion lineal (clasificacion) recompra, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+train_dummy2 <- dummy_cols(train2,
+                       select_columns = c("dia_semana_max_compras", "region", "mes_max_compras"),
+                       remove_selected_columns = TRUE,
+                       remove_first_dummy = TRUE)
+
+train_dummy2 <- select(train_dummy2, - ultima_devolucion, 
+                      -total_devoluciones,
+                      -cantidad_devuelta,
+                      -cantidad_total,
+                      -dinero,
+                      -indice_devolucion,
+                      -veces_devoluciones, 
+                      - ultima_compra)
+
+
+# Entrenamiento del modelo logístico
+modelo_completo2 <- glm(
+  ha_recomprado ~ hora_max_compras 
+               + cantidad_productos 
+               + dia_semana_max_compras_jueves 
+               + dia_semana_max_compras_viernes 
+               + dia_semana_max_compras_sábado 
+               + dia_semana_max_compras_domingo 
+               + dia_semana_max_compras_lunes 
+               + dia_semana_max_compras_martes 
+               + region_América 
+               + region_Asia 
+               + region_Europa 
+               + region_Otros 
+               + mes_max_compras_2 
+               + mes_max_compras_3 
+               + mes_max_compras_4 
+               + mes_max_compras_5 
+               + mes_max_compras_6 
+               + mes_max_compras_7 
+               + mes_max_compras_8 
+               + mes_max_compras_9 
+               + mes_max_compras_10 
+               + mes_max_compras_11 
+               + mes_max_compras_12,
+  data = train_dummy2,
+  family = binomial
+)
+
+# Predicción en datos de prueba
+predtest_prob2 <- predict(modelo_completo2, newdata = test_dummy, type = "response")
+
+# Convertimos las probabilidades a clases: SI o NO
+predtest2 <- ifelse(predtest_prob2 > 0.5, "SI", "NO")
+
+# Creamos una tabla de resultados comparando predicción vs realidad
+results_test2 <- table(Real = test_dummy$ha_devuelto, Predicho = predtest2)
+
+# Proporciones de la tabla de confusión
+prop.table(results_test2)
+
+#Calculo el acurracy de test
+accuracy_test2<-sum(diag(results_test2))/sum(results_test2)
+accuracy_test2
+
+#TP/(TP+FN)
+recall_test2<-(results_test2[2,2]/(results_test2[2,1]+results_test2[2,2]))
+recall_test2
+
+#TP/(TP+FP)
+precision_test2<-(results_test2[2,2]/(results_test2[1,2]+results_test2[2,2]))
+precision_test2
+```
+
+[**Resumen de los modelos [RECOMPRA]**]{.underline}
+
+```{r Metricas modelos recompra , echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+modelos <- c("Naive Bayes", "Árbol de Decisión", "Random Forest", "Regresión Logística")
+accuracy <- c(accuracyNB6, accuracyDT5, accuracyDT10, accuracy_test2)
+recall <- c(recall6, recall5, recall10, recall_test2)
+precision <- c(precision6, precision5, precision10, precision_test2)
+
+# Crear el dataframe
+metricas_df <- data.frame(
+  Modelo = modelos,
+  Accuracy = round(accuracy, 3),
+  Recall = round(recall, 3),
+  Precision = round(precision, 3)
+)
+
+# Transformar a formato largo
+metricas_long <- pivot_longer(metricas_df, cols = -Modelo, names_to = "Métrica", values_to = "Valor")
+
+# Graficar
+ggplot(metricas_long, aes(x = Modelo, y = Valor, fill = Métrica)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  labs(title = "Comparación de métricas de modelos de recompra",
+       x = "Modelo", y = "Valor Métrico") +
+  scale_fill_brewer(palette = "Set2") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom")
+```
+
+[**Interpretación de las métricas**]{.underline}
+
+En nuestro caso, el *accuracy* refleja la proporción de predicciones correctas (tanto de clientes que recomprarán como de los que no), pero puede resultar engañoso si existe un desequilibrio entre ambos grupos. El *precision* mide, de los clientes que el modelo predice como "recomprarán", qué porcentaje efectivamente vuelve a comprar; mientras que el *recall* indica, de todos los clientes que realmente recompran, qué porcentaje logramos identificar.
+
+Para esta empresa, conviene priorizar el **precision** sobre el recall, porque enfocarnos en aquellos con mayor probabilidad real de recompra nos permite optimizar el presupuesto de marketing (evitando invertir en contactos poco prometedores) y maximizar el retorno de las acciones (promociones, cupones, comunicaciones personalizadas). Un precision alto asegura que la mayoría de las personas a las que llegamos realmente responderán con una nueva compra, y con ello reducimos el desperdicio de recursos en falsos positivos.
+
+[**Conclusión del modelo [RECOMPRA]**]{.underline}
+
+Dado que buscamos priorizar el precision, el modelo óptimo sería el de **Naive Bayes**, puesto que presenta el precision más alto de todos, así como un accuracy bastante bueno.
+
+## 12. Modelos de predicción [DINERO GASTADO]
+
+El modelo de Regresión lineal para predecir cuánto dinero gastará un cliente es:
+
+```{r Regresion lineal dinero gastado,echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+clientes_num <- clientes[sapply(clientes, is.numeric)]
+
+corr_matrix <- cor(clientes_num)
+# Generar el corplot
+corrplot(corr_matrix, method = "color",
+addCoef.col = "black",
+tl.cex = 0.8, 
+number.cex = 0.7, 
+title = "Matriz de Correlaciones",
+mar = c(0,0,1,0))
+
+
+train_dummy3 <- dummy_cols(train3,
+                       select_columns = c("dia_semana_max_compras", "region", "mes_max_compras"),
+                       remove_selected_columns = TRUE,
+                       remove_first_dummy = TRUE)
+
+train_dummy3 = train_dummy3 %>% select(-total_compras, -total_devoluciones)
+
+
+lm_model <- lm(dinero ~ ., data=train_dummy3[,c(-5,-10,-11,-2)])
+
+predicted <- predict.lm(lm_model, test_dummy)
+
+
+summary(lm_model)
+
+cor(test_dummy$dinero, predicted)
+
+#prediccion versus real
+resultados <- data.frame(
+real = test_dummy$dinero,
+predicho = as.numeric(predicted)
+)
+
+ggplot(resultados, aes(x = real, y = predicho)) +
+geom_point(color = "steelblue", size = 2) +
+geom_abline(slope = 1, intercept = 0, color = "red", linetype =
+"dashed") +
+labs(
+title = "Consumo de energía: dinero gastado vs predicho",
+x = "Consumo real",
+y = "Consumo predicho"
+) +
+theme_minimal()
+
+rmse(actual = test_dummy$dinero,
+predicted = predicted)
+
+sd(test_dummy$dinero)
+
+lm_model$coefficient
+
+```
+
+El modelo de Decision Tree para predecir cuánto dinero gastará un cliente es:
+
+```{r Decision Tree dinero gastado,echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+modeloDTL <- rpart(dinero ~ . -total_compras -total_devoluciones -cantidad_total,
+method = "anova",
+data = train3)
+
+predDTl<-predict(modeloDTL, newdata=test, type="vector")
+cor(test$dinero, predDTl)
+
+summary(predDT3)
+
+df_plot <- data.frame(
+  dinero_real = test$dinero,
+  prediccion = predDTl
+)
+
+ggplot(data = df_plot, aes(x = dinero_real, y = prediccion)) +
+  geom_point(color = "steelblue", alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "darkred") +
+  labs(
+    title = "Relación entre Dinero Real y Predicción",
+    x = "Dinero real",
+    y = "Dinero predicho"
+  ) +
+  theme_minimal()
+
+
+rmse(actual = test$dinero,
+predicted = predDTl)
+
+
+sd(test$dinero)
+
+rpart.plot(modeloDTL)
+
+```
+
+El modelo de Random Forest para predecir cuánto dinero gastará un cliente es:
+
+```{r Random forest dinero gastado,echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+train4 = train %>% select(-ultima_devolucion)
+
+modeld1 <- randomForest(dinero~.-total_compras -total_devoluciones -cantidad_total, data=train4, importance = TRUE, type = "anova")
+
+predRFD <- predict(modeld1, newdata = test, type = "response")
+
+cor(test$dinero, predRFD)
+
+summary(predRFD)
+
+df_plot_rfd <- data.frame(
+  dinero_real = test$dinero,
+  prediccion = predRFD
+)
+
+ggplot(data = df_plot_rfd, aes(x = dinero_real, y = prediccion)) +
+  geom_point(color = "seagreen", alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  labs(
+    title = "Predicción (Random Forest) vs Dinero real",
+    x = "Dinero real",
+    y = "Dinero predicho (predRFD)"
+  ) +
+  theme_minimal()
+
+rmse(actual = test$dinero,
+predicted = predRFD)
+
+```
+
+[**Resumen de los modelos [DINERO GASTADO]**]{.underline}
+
+```{r Metricas modelos dinero gastado,echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+sd_real <- sd(test$dinero)
+
+# Cálculo del RMSE de cada modelo
+rmse_lm <- rmse(actual = test$dinero, predicted = predict(lm_model, test_dummy))
+rmse_dt <- rmse(actual = test$dinero, predicted = predDTl)
+rmse_rf <- rmse(actual = test$dinero, predicted = predRFD)
+
+# Crear DataFrame con los valores
+rmse_values <- data.frame(
+  Modelo = c("Regresión Lineal", "Árbol de Decisión", "Random Forest"),
+  RMSE = c(rmse_lm, rmse_dt, rmse_rf)
+)
+
+# Mostrar la tabla si deseas
+
+ggplot(rmse_values, aes(x = Modelo, y = RMSE, fill = Modelo)) +
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  labs(
+    title = "Comparación del RMSE de los modelos de predicción de dinero gastado",
+    x = "Modelo",
+    y = "RMSE"
+  ) +
+  geom_hline(yintercept = sd_real, color = "red", linetype = "dashed", size = 1) +
+  annotate(
+    "text",
+    x = 2,  # Centrado en la segunda barra
+    y = sd_real - 500,  # Un poco arriba de la línea
+    label = paste("Desviación estándar:", round(sd_real, 2)),
+    color = "red",
+    size = 4
+  ) +
+  theme_minimal()
+
+```
+
+[**Conclusión del modelo [DINERO GASTADO]**]{.underline}
+
+Los tres modelos presentan un RMSE bastante aceptable, dado que se mantienen por debajo de la deviación estándar. Sin embargo, el RMSE del modelo de **regresión lineal** es significativamente menor que el de los otros modelos, lo que lo convierte en la mejor opción.
+
+## 13. Implicaciones económicas de la implementación de los modelos
+
+A continuación se presentan las implicaciones económicas que tendría implementar los dos modelos ganadores, el de Naive Bayes para recompra y el de Random Forest para devolución.
+
+```{r Implicaciones economicas, echo=TRUE, message=TRUE, warning=TRUE,  include = TRUE}
+
+# 1) DEFINIR PARÁMETROS UNITARIOS
+# Costo promedio de procesar una devolución (USD por Devolución)
+C_dev    <- 20     
+# Costo de cada intervención (USD por cliente contactado)
+C_int    <- 3       
+# Margen promedio absoluto que deja cada venta (USD de ganancia por venta)
+M_venta  <- 30    
+
+# 2) MÉTRICAS CLAVE DEL MODELO
+# Devoluciones
+recall_dev    <- 0.6217   # recall del modelo de devolución
+precision_dev <- 0.7224   #precision del modelo de devolución
+n_returns     <- 5172     #cantidad total de facturas con devolución
+loss_total_dev<- 918936.60 # pérdida histórica total en USD por devoluciones
+
+# Recompra
+recall_rep    <- 0.3097    # recall del modelo de recompra
+precision_rep <- 0.81395  #precision del modelo de recompra
+n_rebuyers    <- 2845      #cantidad total de clientes que efectivamente recompraron
+
+# 3) AHORRO POR DEVOLUCIONES EVITADAS
+# A_dev = recall_dev * pérdida histórica total
+A_dev <- recall_dev * loss_total_dev
+print(A_dev)
+
+# 4) COSTO DE INTERVENCIONES – DEVOLUCIONES
+# Número de alertas (VerdaderosPositivos(TP) + FalsosPositivos (FP) para devolución
+tp_dev     <- recall_dev * n_returns
+fp_dev     <- (1 - precision_dev) / precision_dev * tp_dev
+alerts_dev <- tp_dev + fp_dev
+
+# Costo total de intervenciones por devolución
+C_int_dev <- alerts_dev * C_int
+print(C_int_dev)
+
+# 5) GANANCIA ADICIONAL POR CAMPAÑAS DE RECOMPRA
+# Número de clientes contactados (TP + FP) para recompra
+tp_rep     <- recall_rep * n_rebuyers
+fp_rep     <- (1 - precision_rep) / precision_rep * tp_rep
+contacted_rep <- tp_rep + fp_rep
+
+# Ingreso extra generado (solo consideramos TP ajustados por precision)
+G_rep <- precision_rep * contacted_rep * M_venta
+print(G_rep)
+
+# 6) COSTO DE INTERVENCIONES – RECOMPRA
+C_int_rep <- contacted_rep * C_int
+print(C_int_rep)
+
+# 7) IMPACTO ECONÓMICO NETO
+impacto <- A_dev - C_int_dev + G_rep - C_int_rep
+print(impacto)
+```
+
+**Ahorro por devoluciones evitadas:** USD 571,302.90
+
+**Costo intervenciones (devoluciones):** USD 13,353.12
+
+**Ganancia adicional por recompra:** USD 26,432.89
+
+**Costo intervenciones (recompra):** USD 3,247.48
+
+**Impacto económico neto estimado:** USD 581,135.20
+
+[**Explicación paso a paso**]{.underline}\
+\
+**1.** Definir parámetros unitarios: en este bloque asignamos los valores base que servirá­n para convertir las métricas del modelo en dólares. C_dev es el costo promedio de procesar una devolución, C_int es el gasto por contactar a un cliente (email, cupón, llamada) y M_venta es la ganancia neta media que deja cada venta exitosa.
+
+**2.** Métricas clave del modelo: aquí guardamos las métricas del desempeño y los totales históricos. Para devoluciones usamos recall_dev (porción de devoluciones reales detectadas), precision_dev (proporción de alertas correctas), n_returns (número de devoluciones reales) y loss_total_dev (pérdida histórica en USD). Para recompra usamos recall_rep, precision_rep y n_rebuyers.
+
+**3.** Ahorro por devoluciones evitadas: calculamos A_dev multiplicando recall_dev por loss_total_dev. Esto estima cuánto dinero dejamos de perder si el modelo detecta correctamente un porcentaje de devoluciones antes de que ocurran.
+
+**4.** Costo de intervenciones -- devoluciones: primero calculamos tp_dev (verdaderos positivos) como recall_dev × n_returns, luego fp_dev (falsos positivos) usando la relación FP = ((1 -- precision_dev) / precision_dev) × tp_dev, y sumamos ambos en alerts_dev. Después, C_int_dev = alerts_dev × C_int nos da el costo total de contactar a los clientes alertados para devolución.
+
+**5.** Ganancia adicional por campañas de recompra: de forma análoga al paso anterior, tp_rep = recall_rep × n_rebuyers, fp_rep = ((1 -- precision_rep) / precision_rep) × tp_rep y contacted_rep = tp_rep + fp_rep. La ganancia G_rep se obtiene como precision_rep × contacted_rep × M_venta, estimando el ingreso extra generado por las recompras bien predichas.
+
+**6.** Costo de intervenciones -- recompra: calculamos C_int_rep = contacted_rep × C_int, que es el gasto total en contactar a todos los clientes previstos para campaña de recompra (aciertos y falsas alarmas).
+
+**7.** Impacto económico neto: finalmente, impacto = A_dev -- C_int_dev + G_rep -- C_int_rep. Esto suma el ahorro por devoluciones evitadas menos su costo de intervención, más la ganancia por recompras menos su costo de intervención, dando el beneficio económico neto estimado de implementar los modelos.
+
+[**Conclusión del modelo (financieramente)**]{.underline}
+
+La implementación de los modelos ganadores (el de Naive Bayes para recompra y el de Random Forest para devolución) arroja un ahorro de aproximadamente **USD 571,302.90** al evitar devoluciones, con un costo de intervenciones de **USD 13,353.12** para contactarlas; por otro lado, la campaña de recompra genera unos **USD 26,432.89** de ingreso adicional y cuesta **USD 3,247.48** en intervenciones. Al combinar estos efectos, el impacto económico neto estimado es de alrededor de **USD 581,135.20**. Esto demuestra que, bajo los supuestos de costos y márgenes definidos, el valor generado por los aciertos del modelo (TP) compensa ampliamente los gastos derivados de las falsas alarmas (FP), haciendo financieramente viable su despliegue.
+
+Todo esto bajo los supuestos de que el costo promedio de una devolución es de **USD 20.00**, el costo por contactar a un cliente es de **USD 3.00**, y que el margen de ganancia por venta sea de aproximadamente **USD 30.00**.
+
+## 13. Conclusiones
+
+A lo largo de la exploración la generación de gráficos y tablas de contingencia, se han podido observar patrones en los datos que nos permiten entender mejor el comportamiento de las variables a predecir. Existen ciertos problemas que existen en el dataframe original que podrían estar afectando la eficacia de los modelos de predicción. Por ejemplo, el aumento significativo en el volumen de compra de los últimos meses sugiere que los datos anteriores de compras pueden mermar la eficacia de los diversos modelos aplicados, aunque esto puede ser evitado utilizando las variables correctas en el modelo utilizado.
+
+En este caso específico, el entendimiento, exploración y comparación de las variables iniciales y las transformaciones hechas en las mismas fue vital para comprender las variables necesarias en los modelos, ya que existen conclusiones del análisis, como por ejemplo la falta de relación entre la región y la cantidad de devoluciones, que nos permitió hacer modelos más robustos y eficientes, descartando variables de ruido dañinas para la calidad de los modelos.
+
+Por otro lado, vemos que existen modelos de clasificación que no se adaptan a las necesidades del dataframe original, demostrado por sus valores en accuracy, precision y recall. Por lo tanto, fue vital durante el proceso realizar la comparación de diversos modelos y de esta forma llegar a uno apropiado para las necesidades de la compañía.
+
+Finalmente, podemos determinar que la aplicación de modelos con la información dada por la compañía fue exitosa, ya que la efectividad de los modelos seleccionados es suficiente para predecir el comportamiento de los clientes. Sin embargo, es importante tener en cuenta que la calidad de los datos y la selección de las variables son factores clave para el éxito de cualquier modelo predictivo.
+
+Además, el análisis financiero revela que la puesta en producción del pipeline de modelos construidos (Naive Bayes para recompra y Random Forest para devolución) generaría un ahorro de USD 571,302.90 al evitar devoluciones, con un costo de intervenciones de USD 13,353.12, mientras que la campaña de recompra adicional aportaría unos USD 26,432.89 de ingresos con un gasto asociado de USD 3,247.48. En conjunto, el impacto económico neto estimado es de USD 581,135.20, lo que demuestra que los beneficios derivados de los aciertos del modelo superan con creces los costos por falsas alarmas y validan la viabilidad financiera de su implementación.
+
+## 14. Recomendaciones
+
+Dado el aumento en el volumen de compras, implementar un sistema de monitoreo continuo de las métricas de los modelos predictivos para ajustar los umbrales y variables según cambien las tendencias de compra y devolución.
+
+Aprovechar las transformaciones realizadas en el dataset durante la exploración para mejorar la calidad de los datos, optimizar la adaptabilidad de los modelos y facilitar la integración de la información en un dashboard de visualización.
+
+Seguir invirtiendo en la capacitación del personal en herramientas de análisis de datos y modelado predictivo, fomentando una cultura basada en datos que garantice la sostenibilidad y mejora continua de los procesos analíticos.
